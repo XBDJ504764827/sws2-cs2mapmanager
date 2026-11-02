@@ -16,8 +16,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  version:
+    name: Compute build version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch tags
+        run: git fetch --tags --force
+
+      - name: Compute next version
+        id: version
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+
+          LATEST_TAG=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)
+
+          if [ -z "$LATEST_TAG" ]; then
+            BASE_VERSION="1.0.0"
+          else
+            IFS=. read -r MAJOR MINOR PATCH <<< "${LATEST_TAG#v}"
+            BASE_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+          fi
+
+          if [ -n "${PR_NUMBER:-}" ]; then
+            VERSION="${BASE_VERSION}-pr.${PR_NUMBER}.${RUN_NUMBER}"
+          elif [ "${GITHUB_REF_NAME}" = "develop" ]; then
+            VERSION="${BASE_VERSION}-dev.${RUN_NUMBER}"
+          else
+            VERSION="${BASE_VERSION}"
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Build version: ${VERSION}"
+
   build:
     name: Lint, build and package
+    needs: version
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -39,7 +82,7 @@ jobs:
 
       - name: Inject build version
         env:
-          VERSION: 1.0.${{ github.run_number }}-dev
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
           sed -i -E "s/(public const string Version = )\"[^\"]*\";/\1\"${VERSION}\";/" src/VersionInfo.cs
@@ -47,7 +90,7 @@ jobs:
 
       - name: Build (warnings are errors)
         env:
-          VERSION: 1.0.${{ github.run_number }}-dev
+          VERSION: ${{ needs.version.outputs.version }}
         run: dotnet build sws2-cs2mapmanager.csproj -c Release --no-restore -warnaserror -p:Version="${VERSION}"
 
       - name: Publish test package
@@ -56,7 +99,7 @@ jobs:
       - name: Rename package
         id: package
         env:
-          VERSION: 1.0.${{ github.run_number }}-dev
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
           SOURCE="build/sws2-cs2mapmanager.zip"
@@ -69,7 +112,117 @@ jobs:
       - name: Upload test package
         uses: actions/upload-artifact@v4
         with:
-          name: sws2-cs2mapmanager-${{ github.run_number }}
+          name: sws2-cs2mapmanager-v${{ needs.version.outputs.version }}
           path: ${{ steps.package.outputs.path }}
           if-no-files-found: error
           retention-days: 14
+
+  comment:
+    name: Comment test package on PR
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Create or update PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- sws2-cs2mapmanager-ci -->';
+            const version = '${{ needs.version.outputs.version }}';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              marker,
+              '### 🧪 Test package ready',
+              '',
+              `Build passed for version \`${version}\`.`,
+              '',
+              'Download the package from the **Artifacts** section of this workflow run.',
+              '',
+              '**Install:** extract the zip into `csgo/addons/swiftlys2/plugins/` and run `sw plugins load sws2-cs2mapmanager` (or restart the server).',
+              '',
+              `[Open workflow run](${runUrl})`
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100
+            });
+
+            const previous = comments.find(comment => comment.body && comment.body.includes(marker));
+
+            if (previous) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: previous.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body
+              });
+            }
+
+  prerelease:
+    name: Publish PR pre-release
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]'
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download package
+        uses: actions/download-artifact@v4
+        with:
+          name: sws2-cs2mapmanager-v${{ needs.version.outputs.version }}
+          path: release
+
+      - name: Publish or update pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: v${{ needs.version.outputs.version }}
+          VERSION: ${{ needs.version.outputs.version }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          # Replace any previous preview for this PR so the latest tag always
+          # points at the current commit and the asset is fresh.
+          PREV_TAGS=$(gh release list --limit 200 --json tagName --jq '.[].tagName' | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+-pr\.${PR_NUMBER}(\.[0-9]+)?$" || true)
+
+          if [ -n "$PREV_TAGS" ]; then
+            while read -r OLD_TAG; do
+              gh release delete "$OLD_TAG" --cleanup-tag --yes || true
+            done <<< "$PREV_TAGS"
+          fi
+
+          cat > release-notes.md <<EOF
+          ## sws2-cs2mapmanager v${VERSION} — PR #${PR_NUMBER} preview
+
+          ${PR_TITLE}
+
+          **Commit:** \`${HEAD_SHA}\`
+
+          This is an automated pre-release. It is replaced on every PR update and removed when the PR is closed.
+
+          ### Install
+          Extract the zip into \`csgo/addons/swiftlys2/plugins/\` and run \`sw plugins load sws2-cs2mapmanager\` (or restart the server).
+          EOF
+
+          gh release create "$TAG" release/*.zip \
+            --prerelease \
+            --latest=false \
+            --title "sws2-cs2mapmanager v${VERSION} (PR #${PR_NUMBER})" \
+            --notes-file release-notes.md \
+            --target "$HEAD_SHA"
