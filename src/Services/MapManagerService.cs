@@ -75,7 +75,7 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
                     _pendingWorkshopChange.Map);
             }
 
-            downloadCommand = _settings.Maps.WorkshopDownloadCommand.Trim();
+            downloadCommand = _settings.Maps.WorkshopDownloadCommand?.Trim() ?? string.Empty;
             downloadTimeout = Math.Clamp(_settings.Maps.WorkshopDownloadTimeoutSeconds, 30, 3600);
         }
 
@@ -344,10 +344,6 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
                 pending.Map,
                 MapChangeRequestStatus.Failed,
                 $"Workshop download timed out after {pending.TimeoutSeconds} seconds.");
-            RaiseProgress(
-                pending.Map,
-                MapChangeProgress.Failed,
-                $"Workshop download timed out after {pending.TimeoutSeconds} seconds.");
             return;
         }
 
@@ -398,6 +394,7 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
             _logger.LogError(exception, "[sws2-cs2mapmanager] Map change request failed for {MapName}", map.Name);
         }
 
+        RaiseProgress(map, MapChangeProgress.Failed, error);
         return new MapChangeRequestResult(status, map, error);
     }
 
