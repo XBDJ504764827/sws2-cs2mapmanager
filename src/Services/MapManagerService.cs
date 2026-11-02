@@ -75,7 +75,7 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
                     _pendingWorkshopChange.Map);
             }
 
-            downloadCommand = _settings.Maps.WorkshopDownloadCommand.Trim();
+            downloadCommand = _settings.Maps.WorkshopDownloadCommand?.Trim() ?? string.Empty;
             downloadTimeout = Math.Clamp(_settings.Maps.WorkshopDownloadTimeoutSeconds, 30, 3600);
         }
 
