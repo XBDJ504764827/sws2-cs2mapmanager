@@ -18,11 +18,11 @@ Edit `configs/plugins/sws2-cs2mapmanager/config.jsonc`:
 }
 ```
 
-Object property order is the map rotation order. Each key is the map name shown to players and each value is its numeric Workshop ID. Quote both keys and IDs because `config.jsonc` uses JSON syntax. Local maps can use values such as `"de_dust2": "local:de_dust2"`. The previous array format with `Name`, `MapName`, and `WorkshopId` remains supported.
+Object property order is the map rotation order. Each key is the map name shown to players and each value is its numeric Workshop ID. Quote both keys and IDs because `config.jsonc` uses JSON syntax. Local maps can use values such as `"de_dust2": "local:de_dust2"`. The previous array format with `Name`, `MapName`, and `WorkshopId` remains supported. This `Available` object is the only map catalog; no fallback maps are generated when it is missing.
 
 ## Workshop maps
 
-Workshop downloads require MultiAddonManager. The map manager requests a server download with `mm_download_addon <id>`, polls until SwiftlyS2 recognizes the installed map, then runs `host_workshop_map <id>`. MultiAddonManager tracks the active Workshop map and includes it in its client addon list; clients are prompted to download required addons when they connect or reconnect. The plugin does not add every configured map to `mm_extra_addons`.
+Workshop downloads require MultiAddonManager. The map manager requests a server download with `mm_download_addon <id>`, polls the installed Workshop addon files until the download finishes, then runs `host_workshop_map <id>`. MultiAddonManager tracks the active Workshop map and includes it in its client addon list; clients are prompted to download required addons when they connect or reconnect. The plugin does not add every configured map to `mm_extra_addons`.
 
 Keep MultiAddonManager loaded and the server logged in to Steam. If Workshop downloading is disabled by setting `WorkshopDownloadCommand` to an empty string, install the map on the server before requesting it. Failed or timed out downloads are logged and are not passed to `host_workshop_map`.
 

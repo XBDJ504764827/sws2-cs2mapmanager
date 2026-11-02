@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.Extensions.Logging;
 using SwiftlyS2.Shared;
+using SwiftlyS2.Shared.FileSystem;
 using Sws2Cs2MapManager.Configuration;
 using Sws2Cs2MapManager.Contracts;
 
@@ -34,6 +35,7 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
         _configuredMaps = configuredMaps;
         RebuildMapCatalog();
         _core.Event.OnMapUnload += OnMapUnload;
+        _core.Event.OnConsoleOutput += OnConsoleOutput;
     }
 
     public event EventHandler<MapChangeProgressEventArgs>? MapChangeProgressed;
@@ -158,6 +160,7 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
         }
 
         _core.Event.OnMapUnload -= OnMapUnload;
+        _core.Event.OnConsoleOutput -= OnConsoleOutput;
         MapChangeProgressed = null;
     }
 
@@ -235,7 +238,10 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
             }
         }
 
-        _logger.LogInformation("[sws2-cs2mapmanager] Loaded {Count} map(s)", _maps.Count);
+        _logger.LogInformation(
+            "[sws2-cs2mapmanager] Loaded {Count} map(s): {Maps}",
+            _maps.Count,
+            string.Join(", ", _mapOrder.Select(map => $"{map.Name} ({map.Value})")));
     }
 
     private static bool IsSafeMapName(string mapName)
@@ -248,7 +254,8 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
     {
         try
         {
-            if (_core.Engine.IsMapValid(map.Value))
+            if (_core.Engine.IsMapValid(map.Value)
+                || (map.Kind == MapKind.Workshop && IsWorkshopAddonInstalled(map.Value)))
             {
                 error = string.Empty;
                 return true;
@@ -263,6 +270,54 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
         {
             _logger.LogWarning(exception, "[sws2-cs2mapmanager] Failed to validate map {MapId}", map.Id);
             error = exception.Message;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// MultiAddonManager stores downloads below the executable search path. SwiftlyS2's
+    /// <c>IsMapValid</c> only handles installed game maps reliably, so check the downloaded
+    /// addon files directly before issuing <c>host_workshop_map</c>.
+    /// </summary>
+    private bool IsWorkshopAddonInstalled(string workshopId)
+    {
+        try
+        {
+            var searchPath = _core.GameFileSystem.GetSearchPath(
+                "EXECUTABLE_PATH",
+                GetSearchPathTypes_t.GET_SEARCH_PATH_ALL,
+                1);
+
+            foreach (var basePath in new[] { searchPath, _core.GameDirectory, _core.GameFilesDirectory })
+            {
+                if (string.IsNullOrWhiteSpace(basePath))
+                {
+                    continue;
+                }
+
+                var addonDirectory = Path.Combine(
+                    basePath.TrimEnd('/', '\\'),
+                    "steamapps",
+                    "workshop",
+                    "content",
+                    "730",
+                    workshopId);
+
+                if (File.Exists(Path.Combine(addonDirectory, $"{workshopId}_dir.vpk"))
+                    || File.Exists(Path.Combine(addonDirectory, $"{workshopId}.vpk")))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogDebug(
+                exception,
+                "[sws2-cs2mapmanager] Failed to inspect Workshop addon {WorkshopId}",
+                workshopId);
             return false;
         }
     }
@@ -300,6 +355,11 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
 
     private void CheckPendingWorkshopChange()
     {
+        CheckPendingWorkshopChange(force: false);
+    }
+
+    private void CheckPendingWorkshopChange(bool force)
+    {
         PendingWorkshopChange? pending;
         lock (_sync)
         {
@@ -313,14 +373,22 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
         }
 
         bool isReady;
-        try
+        if (force)
         {
-            isReady = _core.Engine.IsMapValid(pending.Map.Value);
+            isReady = true;
         }
-        catch (Exception exception)
+        else
         {
-            _logger.LogWarning(exception, "[sws2-cs2mapmanager] Failed to check Workshop map {WorkshopId}", pending.Map.Value);
-            isReady = false;
+            try
+            {
+                isReady = _core.Engine.IsMapValid(pending.Map.Value)
+                    || IsWorkshopAddonInstalled(pending.Map.Value);
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(exception, "[sws2-cs2mapmanager] Failed to check Workshop map {WorkshopId}", pending.Map.Value);
+                isReady = false;
+            }
         }
 
         if (isReady)
@@ -335,6 +403,10 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
                 _pendingWorkshopChange = null;
             }
 
+            _logger.LogInformation(
+                "[sws2-cs2mapmanager] Workshop addon {WorkshopId} finished downloading; changing map to {MapName}",
+                pending.Map.Value,
+                pending.Map.Name);
             IssueMapChange(pending.Map, $"host_workshop_map {pending.Map.Value}");
             return;
         }
@@ -378,6 +450,37 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
                 "[sws2-cs2mapmanager] Cancelled pending Workshop change for {WorkshopId} after map unload",
                 cancelled.Map.Value);
         }
+    }
+
+    /// <summary>
+    /// MultiAddonManager logs a completion line when Steam finishes a download. Use it as a
+    /// fallback when the server layout stores Workshop content outside the usual search paths.
+    /// </summary>
+    private void OnConsoleOutput(SwiftlyS2.Shared.Events.IOnConsoleOutputEvent @event)
+    {
+        PendingWorkshopChange? pending;
+        lock (_sync)
+        {
+            pending = _pendingWorkshopChange;
+        }
+
+        if (pending is null)
+        {
+            return;
+        }
+
+        var message = @event.Message;
+        if (string.IsNullOrEmpty(message)
+            || !message.Contains("downloaded successfully", StringComparison.OrdinalIgnoreCase)
+            || !message.Contains(pending.Map.Value, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _logger.LogInformation(
+            "[sws2-cs2mapmanager] MultiAddonManager reported Workshop addon {WorkshopId} as downloaded",
+            pending.Map.Value);
+        _core.Scheduler.NextTick(() => CheckPendingWorkshopChange(force: true));
     }
 
     private void ClearPendingWorkshopChange()

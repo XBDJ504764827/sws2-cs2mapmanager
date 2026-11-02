@@ -49,7 +49,10 @@ public static class ConfiguredMapReader
                 || !TryGetProperty(plugin, "Maps", out var maps)
                 || !TryGetProperty(maps, "Available", out var available))
             {
-                return DefaultMaps();
+                logger.LogWarning(
+                    "[sws2-cs2mapmanager] Maps.Available is missing from {ConfigPath}; no maps will be available",
+                    configPath);
+                return [];
             }
 
             var result = new List<ConfiguredMap?>();
@@ -110,20 +113,6 @@ public static class ConfiguredMapReader
             logger.LogError(exception, "[sws2-cs2mapmanager] Failed to read the map catalog configuration");
             return [];
         }
-    }
-
-    private static IReadOnlyList<ConfiguredMap?> DefaultMaps()
-    {
-        return
-        [
-            new() { Name = "de_dust2", MapName = "de_dust2" },
-            new() { Name = "de_inferno", MapName = "de_inferno" },
-            new() { Name = "de_mirage", MapName = "de_mirage" },
-            new() { Name = "de_ancient", MapName = "de_ancient" },
-            new() { Name = "de_nuke", MapName = "de_nuke" },
-            new() { Name = "de_anubis", MapName = "de_anubis" },
-            new() { Name = "de_overpass", MapName = "de_overpass" }
-        ];
     }
 
     private static bool TryReadMap(JsonElement element, string? fallbackName, out ConfiguredMap configured)
