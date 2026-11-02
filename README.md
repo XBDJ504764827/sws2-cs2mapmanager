@@ -25,6 +25,12 @@ Workshop downloads require MultiAddonManager. The map manager requests a server 
 
 Keep MultiAddonManager loaded and the server logged in to Steam. If Workshop downloading is disabled by setting `WorkshopDownloadCommand` to an empty string, install the map on the server before requesting it. Failed or timed out downloads are logged and are not passed to `host_workshop_map`.
 
+## Deployment
+
+For development builds, download the CI artifact from the latest workflow run and extract the `sws2-cs2mapmanager` directory into `csgo/addons/swiftlys2/plugins/`. Load `sws2-cs2mapmanager` before plugins that consume `IMapManagerService`.
+
+The first load creates `csgo/addons/swiftlys2/configs/plugins/sws2-cs2mapmanager/config.jsonc` from the template. Put local map names in `MapName` entries and Workshop PublishedFileIds in `WorkshopId` entries. Install MultiAddonManager to enable server-side downloads of Workshop maps; without it, install the Workshop map on the server first and set `WorkshopDownloadCommand` to an empty string. Clients receive the active Workshop map through MultiAddonManager's normal connection download flow.
+
 ## Shared API
 
 Other plugins resolve `IMapManagerService` with `IMapManagerService.InterfaceKey`, call `GetMaps()` for `MapInfo` entries, and request changes using the map's stable `Id`. `RequestChange` reports whether a change started, a download began, or the request failed. `MapChangeProgressed` reports download, change, and failure stages.
