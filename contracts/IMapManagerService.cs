@@ -63,7 +63,7 @@ public interface IMapManagerService
     /// <summary>Raised when a request starts downloading, issues a change, or fails.</summary>
     event EventHandler<MapChangeProgressEventArgs>? MapChangeProgressed;
 
-    /// <summary>Returns the configured map catalog.</summary>
+    /// <summary>Returns the configured map catalog in configuration order.</summary>
     IReadOnlyList<MapInfo> GetMaps();
 
     /// <summary>Requests a map change using an ID returned by <see cref="GetMaps"/>.</summary>
