@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, develop]
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Lint, build and package
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+          cache: true
+          cache-dependency-path: "**/*.csproj"
+
+      - name: Restore dependencies
+        run: dotnet restore sws2-cs2mapmanager.csproj
+
+      - name: Verify formatting and analyzers
+        run: dotnet format sws2-cs2mapmanager.sln --verify-no-changes --no-restore --severity warn
+
+      - name: Inject build version
+        env:
+          VERSION: 1.0.${{ github.run_number }}-dev
+        run: |
+          set -euo pipefail
+          sed -i -E "s/(public const string Version = )\"[^\"]*\";/\1\"${VERSION}\";/" src/VersionInfo.cs
+          grep -F "public const string Version = \"${VERSION}\";" src/VersionInfo.cs
+
+      - name: Build (warnings are errors)
+        env:
+          VERSION: 1.0.${{ github.run_number }}-dev
+        run: dotnet build sws2-cs2mapmanager.csproj -c Release --no-restore -warnaserror -p:Version="${VERSION}"
+
+      - name: Publish test package
+        run: dotnet publish sws2-cs2mapmanager.csproj -c Release --no-restore --no-build
+
+      - name: Rename package
+        id: package
+        env:
+          VERSION: 1.0.${{ github.run_number }}-dev
+        run: |
+          set -euo pipefail
+          SOURCE="build/sws2-cs2mapmanager.zip"
+          TARGET="build/sws2-cs2mapmanager-v${VERSION}.zip"
+          test -f "$SOURCE"
+          mv "$SOURCE" "$TARGET"
+          echo "path=${TARGET}" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$TARGET")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: sws2-cs2mapmanager-${{ github.run_number }}
+          path: ${{ steps.package.outputs.path }}
+          if-no-files-found: error
+          retention-days: 14

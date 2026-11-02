@@ -1,0 +1,24 @@
+{
+  "sws2-cs2mapmanager": {
+    "Debug": false,
+    "Maps": {
+      // Requires MultiAddonManager when Workshop maps are not already installed on the server.
+      "WorkshopDownloadCommand": "mm_download_addon",
+      "WorkshopDownloadTimeoutSeconds": 600,
+      "Available": [
+        {
+          "Name": "Dust II",
+          "MapName": "de_dust2"
+        },
+        {
+          "Name": "Mirage",
+          "MapName": "de_mirage"
+        },
+        {
+          "Name": "KZ Grotto",
+          "WorkshopId": "3121168339"
+        }
+      ]
+    }
+  }
+}
