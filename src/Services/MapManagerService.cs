@@ -15,28 +15,35 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
     private readonly ILogger _logger;
     private readonly object _sync = new();
     private readonly Dictionary<string, MapInfo> _maps = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<MapInfo> _mapOrder = [];
 
     private MapManagerSettings _settings;
+    private IReadOnlyList<ConfiguredMap?> _configuredMaps;
     private PendingWorkshopChange? _pendingWorkshopChange;
     private CancellationTokenSource? _pendingCheck;
     private bool _disposed;
 
-    public MapManagerService(ISwiftlyCore core, MapManagerSettings settings)
+    public MapManagerService(
+        ISwiftlyCore core,
+        MapManagerSettings settings,
+        IReadOnlyList<ConfiguredMap?> configuredMaps)
     {
         _core = core;
         _logger = core.Logger;
         _settings = settings;
+        _configuredMaps = configuredMaps;
         RebuildMapCatalog();
         _core.Event.OnMapUnload += OnMapUnload;
     }
 
     public event EventHandler<MapChangeProgressEventArgs>? MapChangeProgressed;
 
-    public void ApplySettings(MapManagerSettings settings)
+    public void ApplySettings(MapManagerSettings settings, IReadOnlyList<ConfiguredMap?> configuredMaps)
     {
         lock (_sync)
         {
             _settings = settings;
+            _configuredMaps = configuredMaps;
             RebuildMapCatalogLocked();
         }
     }
@@ -45,7 +52,7 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
     {
         lock (_sync)
         {
-            return _maps.Values.ToArray();
+            return _mapOrder.ToArray();
         }
     }
 
@@ -165,8 +172,8 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
     private void RebuildMapCatalogLocked()
     {
         _maps.Clear();
-        var configuredMaps = _settings.Maps.Available ?? [];
-        foreach (var configured in configuredMaps)
+        _mapOrder.Clear();
+        foreach (var configured in _configuredMaps)
         {
             if (configured is null)
             {
@@ -221,6 +228,10 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
             if (!_maps.TryAdd(map.Id, map))
             {
                 _logger.LogWarning("[sws2-cs2mapmanager] Ignoring duplicate map entry '{MapId}'", map.Id);
+            }
+            else
+            {
+                _mapOrder.Add(map);
             }
         }
 

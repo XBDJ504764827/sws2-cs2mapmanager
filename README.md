@@ -1,6 +1,6 @@
 # SWS2 CS2 Map Manager
 
-Shared configured map catalog and map-change service for SwiftlyS2 plugins. The admin plugin and future RTV plugin use this catalog instead of maintaining duplicate map lists.
+Shared configured map catalog and map-change service for SwiftlyS2 plugins. The admin and rockthevote plugins use this catalog instead of maintaining duplicate map lists.
 
 ## Map configuration
 
@@ -10,14 +10,15 @@ Edit `configs/plugins/sws2-cs2mapmanager/config.jsonc`:
 "Maps": {
   "WorkshopDownloadCommand": "mm_download_addon",
   "WorkshopDownloadTimeoutSeconds": 600,
-  "Available": [
-    { "Name": "Dust II", "MapName": "de_dust2" },
-    { "Name": "KZ Grotto", "WorkshopId": "3121168339" }
-  ]
+  "Available": {
+    "kz_func_detail": "3798986356",
+    "kz_sxb2_cxz": "3083714192",
+    "kz_sc_ruins": "3767757448"
+  }
 }
 ```
 
-Each entry must set exactly one of `MapName` or `WorkshopId`. `Name` is the label shown by menus and votes. Map names are checked against the server; Workshop IDs must be numeric.
+Object property order is the map rotation order. Each key is the map name shown to players and each value is its numeric Workshop ID. Quote both keys and IDs because `config.jsonc` uses JSON syntax. Local maps can use values such as `"de_dust2": "local:de_dust2"`. The previous array format with `Name`, `MapName`, and `WorkshopId` remains supported.
 
 ## Workshop maps
 
@@ -29,7 +30,7 @@ Keep MultiAddonManager loaded and the server logged in to Steam. If Workshop dow
 
 For development builds, download the CI artifact from the latest workflow run and extract the `sws2-cs2mapmanager` directory into `csgo/addons/swiftlys2/plugins/`. Load `sws2-cs2mapmanager` before plugins that consume `IMapManagerService`.
 
-The first load creates `csgo/addons/swiftlys2/configs/plugins/sws2-cs2mapmanager/config.jsonc` from the template. Put local map names in `MapName` entries and Workshop PublishedFileIds in `WorkshopId` entries. Install MultiAddonManager to enable server-side downloads of Workshop maps; without it, install the Workshop map on the server first and set `WorkshopDownloadCommand` to an empty string. Clients receive the active Workshop map through MultiAddonManager's normal connection download flow.
+The first load creates `csgo/addons/swiftlys2/configs/plugins/sws2-cs2mapmanager/config.jsonc` from the template. Install MultiAddonManager to enable server-side downloads of Workshop maps; without it, install the Workshop map on the server first and set `WorkshopDownloadCommand` to an empty string. Clients receive the active Workshop map through MultiAddonManager's normal connection download flow.
 
 ## Shared API
 
