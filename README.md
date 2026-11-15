@@ -18,25 +18,27 @@ Edit `configs/plugins/sws2-cs2mapmanager/config.jsonc`:
 }
 ```
 
-Object property order is the map rotation order. Existing `"map_name": "WorkshopID"` entries remain supported. To store separate difficulty tiers, use an object for each map:
+Object property order is the map rotation order. Existing `"map_name": "WorkshopID"` entries remain supported. To store separate difficulty tiers for each mode and run type, use an object for each map:
 
 ```jsonc
 "Available": {
   "kz_angina": {
     "WorkshopId": "3636272568",
-    "CKZ": null,
-    "VNL": null
+    "CKZ": { "NUB": null, "PRO": null },
+    "VNL": { "NUB": null, "PRO": null }
   },
   "kz_angina_x": {
     "WorkshopId": "3746453872",
-    "CKZ": null,
-    "VNL": null
+    "CKZ": { "NUB": null, "PRO": null },
+    "VNL": { "NUB": null, "PRO": null }
   },
-  "de_dust2": { "MapName": "de_dust2", "CKZ": null, "VNL": null }
+  "de_dust2": { "MapName": "de_dust2", "CKZ": { "NUB": null, "PRO": null }, "VNL": { "NUB": null, "PRO": null } }
 }
 ```
 
-Replace each `null` with that mode's real positive numeric tier (for example `"CKZ": 2, "VNL": 5` when those are the actual ratings). CKZ and VNL are independent: a missing value in one mode never borrows the other mode's rating. Missing keys, `null`, blank/placeholder strings and invalid values mean unknown; quoted positive integers also work. No ratings are guessed from Workshop titles or map names.
+Each map has four independent ratings: **CKZ NUB**, **CKZ PRO**, **VNL NUB**, **VNL PRO**. NUB means runs with checkpoints (存点); PRO means runs without checkpoints (裸跳). Replace each `null` with the actual positive numeric tier for that exact category. Missing keys, `null`, blank/placeholder strings and invalid values mean unknown; quoted positive integers also work. Values are never copied between run types or modes.
+
+Old scalar mode ratings (such as `"CKZ": 2`) remain accessible through the legacy mode-only API fields, but cannot identify whether NUB or PRO was intended. New menus show those run categories as unknown until you fill in the nested fields. No ratings are guessed from map names or Workshop titles.
 
 JSONC uses commas between fields, and the fields must be nested inside each map object; semicolons and repeated top-level CKZ/VNL keys cannot associate tiers with individual maps. A ready-to-fill list of the 15 requested maps is included in [`resources/templates/map-catalog.example.jsonc`](resources/templates/map-catalog.example.jsonc), with all tiers set to `null`. Copy its `Available` object into your existing configuration, keeping your server settings.
 
@@ -56,7 +58,7 @@ The first load creates `csgo/addons/swiftlys2/configs/plugins/sws2-cs2mapmanager
 
 ## Shared API
 
-Other plugins resolve `IMapManagerService` with `IMapManagerService.InterfaceKey`, call `GetMaps()` for `MapInfo` entries, and request changes using the map's stable `Id`. `MapInfo.CkzTier` and `MapInfo.VnlTier` are nullable integers available to every consumer, including RTV and admin menus. The original four-argument constructor remains unchanged. `RequestChange` reports whether a change started, a download began, or the request failed. `MapChangeProgressed` reports download, change, and failure stages.
+Other plugins resolve `IMapManagerService` with `IMapManagerService.InterfaceKey`, call `GetMaps()` for `MapInfo` entries, and request changes using the map's stable `Id`. `MapInfo.CkzNubTier`, `MapInfo.CkzProTier`, `MapInfo.VnlNubTier` and `MapInfo.VnlProTier` are nullable integers available to every consumer, including RTV and admin menus. The old `CkzTier`/`VnlTier` fields retain only legacy scalar ratings and never serve as run-type fallbacks. The original four-argument constructor remains unchanged. `RequestChange` reports whether a change started, a download began, or the request failed. `MapChangeProgressed` reports download, change, and failure stages.
 
 ## Build
 
@@ -74,4 +76,4 @@ dotnet publish sws2-cs2mapmanager.csproj -c Release --no-restore
 dotnet run --project tests/CatalogChecks/CatalogChecks.csproj -c Release
 ```
 
-These check independent mode ratings, unknown/invalid values, compact entries, extended objects, local maps and legacy arrays without a running server.
+These check all four independent mode/run ratings, unknown/invalid values, compact entries, extended objects, local maps and legacy arrays without a running server.

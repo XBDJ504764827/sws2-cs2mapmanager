@@ -31,11 +31,19 @@ public sealed class ConfiguredMap
     /// <summary>Steam Workshop PublishedFileId for a CS2 map addon.</summary>
     public string? WorkshopId { get; set; }
 
-    /// <summary>Optional positive difficulty tier for the CKZ mode.</summary>
+    /// <summary>Legacy mode-only CKZ tier; not used for NUB/PRO.</summary>
     public int? CkzTier { get; set; }
 
-    /// <summary>Optional positive difficulty tier for the VNL mode.</summary>
+    /// <summary>Legacy mode-only VNL tier; not used for NUB/PRO.</summary>
     public int? VnlTier { get; set; }
+
+    public int? CkzNubTier { get; set; }
+
+    public int? CkzProTier { get; set; }
+
+    public int? VnlNubTier { get; set; }
+
+    public int? VnlProTier { get; set; }
 }
 
 /// <summary>Reads both the compact map-name-to-Workshop-ID object and legacy map arrays.</summary>
@@ -142,9 +150,18 @@ public static class ConfiguredMapReader
 
         configured.CkzTier = ReadTier(element, "CKZ");
         configured.VnlTier = ReadTier(element, "VNL");
+        configured.CkzNubTier = ReadModeTier(element, "CKZ", "NUB");
+        configured.CkzProTier = ReadModeTier(element, "CKZ", "PRO");
+        configured.VnlNubTier = ReadModeTier(element, "VNL", "NUB");
+        configured.VnlProTier = ReadModeTier(element, "VNL", "PRO");
 
         return !string.IsNullOrWhiteSpace(configured.MapName)
             || !string.IsNullOrWhiteSpace(configured.WorkshopId);
+    }
+
+    private static int? ReadModeTier(JsonElement element, string mode, string runType)
+    {
+        return TryGetProperty(element, mode, out var modeTiers) ? ReadTier(modeTiers, runType) : null;
     }
 
     private static int? ReadTier(JsonElement element, string name)

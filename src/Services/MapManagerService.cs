@@ -231,7 +231,11 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
             map = map with
             {
                 CkzTier = configured.CkzTier is > 0 ? configured.CkzTier : null,
-                VnlTier = configured.VnlTier is > 0 ? configured.VnlTier : null
+                VnlTier = configured.VnlTier is > 0 ? configured.VnlTier : null,
+                CkzNubTier = configured.CkzNubTier is > 0 ? configured.CkzNubTier : null,
+                CkzProTier = configured.CkzProTier is > 0 ? configured.CkzProTier : null,
+                VnlNubTier = configured.VnlNubTier is > 0 ? configured.VnlNubTier : null,
+                VnlProTier = configured.VnlProTier is > 0 ? configured.VnlProTier : null
             };
             if (!_maps.TryAdd(map.Id, map))
             {

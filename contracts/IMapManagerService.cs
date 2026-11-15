@@ -10,11 +10,23 @@ public enum MapKind
 /// <summary>A configured map available for administration or voting.</summary>
 public sealed record MapInfo(string Id, string Name, MapKind Kind, string Value)
 {
-    /// <summary>Configured CKZ difficulty tier; null when unrated or unknown.</summary>
+    /// <summary>Legacy CKZ rating without a run type. Never used as a NUB or PRO fallback.</summary>
     public int? CkzTier { get; init; }
 
-    /// <summary>Configured VNL difficulty tier; independent of CKZ, null when unknown.</summary>
+    /// <summary>Legacy VNL rating without a run type. Never used as a NUB or PRO fallback.</summary>
     public int? VnlTier { get; init; }
+
+    /// <summary>CKZ with checkpoints (NUB); null when unknown.</summary>
+    public int? CkzNubTier { get; init; }
+
+    /// <summary>CKZ without checkpoints (PRO); null when unknown.</summary>
+    public int? CkzProTier { get; init; }
+
+    /// <summary>VNL with checkpoints (NUB); null when unknown.</summary>
+    public int? VnlNubTier { get; init; }
+
+    /// <summary>VNL without checkpoints (PRO); null when unknown.</summary>
+    public int? VnlProTier { get; init; }
 }
 
 /// <summary>Outcome of a request to change the server map.</summary>

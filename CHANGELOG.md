@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### NUB / PRO ratings
+
+- Support nested CKZ/VNL NUB/PRO ratings in configuration and expose four independent nullable fields through MapInfo. Preserve legacy scalar metadata without inferring a run type.
+
 ### Added
 
 - Add independent nullable CKZ/VNL tiers to extended map configuration and the shared MapInfo contract; keep compact entries and the original constructor compatible.
