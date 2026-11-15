@@ -30,6 +30,12 @@ public sealed class ConfiguredMap
 
     /// <summary>Steam Workshop PublishedFileId for a CS2 map addon.</summary>
     public string? WorkshopId { get; set; }
+
+    /// <summary>Optional positive difficulty tier for the CKZ mode.</summary>
+    public int? CkzTier { get; set; }
+
+    /// <summary>Optional positive difficulty tier for the VNL mode.</summary>
+    public int? VnlTier { get; set; }
 }
 
 /// <summary>Reads both the compact map-name-to-Workshop-ID object and legacy map arrays.</summary>
@@ -134,8 +140,20 @@ public static class ConfiguredMapReader
             configured.WorkshopId = workshopId.ToString();
         }
 
+        configured.CkzTier = ReadTier(element, "CKZ");
+        configured.VnlTier = ReadTier(element, "VNL");
+
         return !string.IsNullOrWhiteSpace(configured.MapName)
             || !string.IsNullOrWhiteSpace(configured.WorkshopId);
+    }
+
+    private static int? ReadTier(JsonElement element, string name)
+    {
+        return TryGetProperty(element, name, out var tier)
+            && tier.ValueKind is JsonValueKind.Number or JsonValueKind.String
+            && int.TryParse(tier.ToString().Trim(), System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var value) && value > 0
+                ? value : null;
     }
 
     private static bool TryGetProperty(JsonElement element, string name, out JsonElement value)

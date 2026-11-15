@@ -228,6 +228,11 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
                     workshopIdText);
             }
 
+            map = map with
+            {
+                CkzTier = configured.CkzTier is > 0 ? configured.CkzTier : null,
+                VnlTier = configured.VnlTier is > 0 ? configured.VnlTier : null
+            };
             if (!_maps.TryAdd(map.Id, map))
             {
                 _logger.LogWarning("[sws2-cs2mapmanager] Ignoring duplicate map entry '{MapId}'", map.Id);

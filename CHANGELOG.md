@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- Add independent nullable CKZ/VNL tiers to extended map configuration and the shared MapInfo contract; keep compact entries and the original constructor compatible.
+- Add a ready-to-fill catalog for the 15 requested maps and regression checks for legacy formats and independent ratings.
+- Align build dependencies with SwiftlyS2 1.5.2.
+
 ### Fixed
 
 - Use only the `Maps.Available` catalog from `config.jsonc`; generated fallback maps no longer appear in admin or RTV menus.

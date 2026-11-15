@@ -8,7 +8,14 @@ public enum MapKind
 }
 
 /// <summary>A configured map available for administration or voting.</summary>
-public sealed record MapInfo(string Id, string Name, MapKind Kind, string Value);
+public sealed record MapInfo(string Id, string Name, MapKind Kind, string Value)
+{
+    /// <summary>Configured CKZ difficulty tier; null when unrated or unknown.</summary>
+    public int? CkzTier { get; init; }
+
+    /// <summary>Configured VNL difficulty tier; independent of CKZ, null when unknown.</summary>
+    public int? VnlTier { get; init; }
+}
 
 /// <summary>Outcome of a request to change the server map.</summary>
 public enum MapChangeRequestStatus

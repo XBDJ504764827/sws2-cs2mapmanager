@@ -18,7 +18,29 @@ Edit `configs/plugins/sws2-cs2mapmanager/config.jsonc`:
 }
 ```
 
-Object property order is the map rotation order. Each key is the map name shown to players and each value is its numeric Workshop ID. Quote both keys and IDs because `config.jsonc` uses JSON syntax. Local maps can use values such as `"de_dust2": "local:de_dust2"`. The previous array format with `Name`, `MapName`, and `WorkshopId` remains supported. This `Available` object is the only map catalog; no fallback maps are generated when it is missing.
+Object property order is the map rotation order. Existing `"map_name": "WorkshopID"` entries remain supported. To store separate difficulty tiers, use an object for each map:
+
+```jsonc
+"Available": {
+  "kz_angina": {
+    "WorkshopId": "3636272568",
+    "CKZ": null,
+    "VNL": null
+  },
+  "kz_angina_x": {
+    "WorkshopId": "3746453872",
+    "CKZ": null,
+    "VNL": null
+  },
+  "de_dust2": { "MapName": "de_dust2", "CKZ": null, "VNL": null }
+}
+```
+
+Replace each `null` with that mode's real positive numeric tier (for example `"CKZ": 2, "VNL": 5` when those are the actual ratings). CKZ and VNL are independent: a missing value in one mode never borrows the other mode's rating. Missing keys, `null`, blank/placeholder strings and invalid values mean unknown; quoted positive integers also work. No ratings are guessed from Workshop titles or map names.
+
+JSONC uses commas between fields, and the fields must be nested inside each map object; semicolons and repeated top-level CKZ/VNL keys cannot associate tiers with individual maps. A ready-to-fill list of the 15 requested maps is included in [`resources/templates/map-catalog.example.jsonc`](resources/templates/map-catalog.example.jsonc), with all tiers set to `null`. Copy its `Available` object into your existing configuration, keeping your server settings.
+
+Compact and extended objects can coexist. Local compact entries such as `"de_dust2": "local:de_dust2"` and legacy arrays with `Name`, `MapName`, `WorkshopId`, `CKZ`, `VNL` are supported. `Available` is the only map catalog; no fallback maps are generated when missing. Changes to ratings are hot-reloaded; reopen a menu to see them.
 
 ## Workshop maps
 
@@ -34,7 +56,7 @@ The first load creates `csgo/addons/swiftlys2/configs/plugins/sws2-cs2mapmanager
 
 ## Shared API
 
-Other plugins resolve `IMapManagerService` with `IMapManagerService.InterfaceKey`, call `GetMaps()` for `MapInfo` entries, and request changes using the map's stable `Id`. `RequestChange` reports whether a change started, a download began, or the request failed. `MapChangeProgressed` reports download, change, and failure stages.
+Other plugins resolve `IMapManagerService` with `IMapManagerService.InterfaceKey`, call `GetMaps()` for `MapInfo` entries, and request changes using the map's stable `Id`. `MapInfo.CkzTier` and `MapInfo.VnlTier` are nullable integers available to every consumer, including RTV and admin menus. The original four-argument constructor remains unchanged. `RequestChange` reports whether a change started, a download began, or the request failed. `MapChangeProgressed` reports download, change, and failure stages.
 
 ## Build
 
@@ -45,3 +67,11 @@ dotnet restore sws2-cs2mapmanager.csproj
 dotnet build sws2-cs2mapmanager.csproj -c Release -warnaserror
 dotnet publish sws2-cs2mapmanager.csproj -c Release --no-restore
 ```
+
+## Catalog regression checks
+
+```sh
+dotnet run --project tests/CatalogChecks/CatalogChecks.csproj -c Release
+```
+
+These check independent mode ratings, unknown/invalid values, compact entries, extended objects, local maps and legacy arrays without a running server.
