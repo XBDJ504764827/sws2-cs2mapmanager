@@ -77,6 +77,11 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore sws2-cs2mapmanager.csproj
 
+      - name: Run map catalog and change regression checks
+        run: |
+          dotnet run --project tests/CatalogChecks/CatalogChecks.csproj -c Release
+          dotnet run --project tests/ChangeChecks/ChangeChecks.csproj -c Release
+
       - name: Verify formatting and analyzers
         run: dotnet format sws2-cs2mapmanager.sln --verify-no-changes --no-restore --severity warn
 

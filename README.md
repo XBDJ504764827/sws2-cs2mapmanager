@@ -77,3 +77,19 @@ dotnet run --project tests/CatalogChecks/CatalogChecks.csproj -c Release
 ```
 
 These check all four independent mode/run ratings, unknown/invalid values, compact entries, extended objects, local maps and legacy arrays without a running server.
+
+## Cancellable map changes
+
+`ScheduleChange(mapId, delaySeconds, source)` owns the countdown and download-to-change workflow centrally. `GetChangeState()` exposes the pending map, source, deadline and pause state. All methods run on the game thread. Existing `RequestChange()` also respects pause and busy state.
+
+`CancelPendingChange()` cancels the current countdown or the automatic switch after a download, and emits `MapChangeControlChanged` to clear old RTV votes even when no countdown exists. `SetChangesPaused(true, actor)` also blocks new managed changes. Resuming requires fresh votes and never revives cancelled work. The reservation is retained by RTV. Pause is temporary: map unload, plugin unload or server restart resets it.
+
+A Steam download may continue after cancellation; the automatic map switch is cancelled. An engine command already issued cannot be recalled. Raw console `changelevel`/`host_workshop_map` and plugins bypassing this service are outside this control.
+
+Update mapmanager, menus, admin and rockthevote together and restart the server when upgrading the shared contracts.
+
+```sh
+dotnet run --project tests/ChangeChecks/ChangeChecks.csproj -c Release
+```
+
+The checks run the actual map service with fake scheduler/engine events: cancelled and stale callbacks, download completion, pause/resume, map unload, configuration removal and consumer/scheduler failures.

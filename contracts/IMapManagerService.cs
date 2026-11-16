@@ -39,7 +39,9 @@ public enum MapChangeRequestStatus
     MapNotFound,
     InvalidMap,
     WorkshopDownloadDisabled,
-    Failed
+    Failed,
+    Scheduled,
+    Paused
 }
 
 /// <summary>Result returned immediately when requesting a map change.</summary>
@@ -53,17 +55,25 @@ public enum MapChangeProgress
 {
     DownloadStarted,
     ChangeIssued,
-    Failed
+    Failed,
+    CountdownStarted,
+    Cancelled
 }
 
 /// <summary>Progress notification for a map change request.</summary>
 public sealed class MapChangeProgressEventArgs : EventArgs
 {
     public MapChangeProgressEventArgs(MapInfo map, MapChangeProgress progress, string? error = null)
+        : this(map, progress, error, 0)
+    {
+    }
+
+    public MapChangeProgressEventArgs(MapInfo map, MapChangeProgress progress, string? error, int delaySeconds)
     {
         Map = map;
         Progress = progress;
         Error = error;
+        DelaySeconds = delaySeconds;
     }
 
     public MapInfo Map { get; }
@@ -71,7 +81,13 @@ public sealed class MapChangeProgressEventArgs : EventArgs
     public MapChangeProgress Progress { get; }
 
     public string? Error { get; }
+
+    public int DelaySeconds { get; }
 }
+
+/// <summary>Current cancellable workflow. Pause remains until explicitly resumed or the map unloads.</summary>
+public sealed record MapChangeState(bool IsPaused, string? PausedBy, MapInfo? PendingMap,
+    string? Source, DateTimeOffset? ScheduledAt, bool IsDownloading);
 
 /// <summary>Shared map catalog and map-change service.</summary>
 public interface IMapManagerService
@@ -84,6 +100,19 @@ public interface IMapManagerService
 
     /// <summary>Returns the configured map catalog in configuration order.</summary>
     IReadOnlyList<MapInfo> GetMaps();
+
+    event EventHandler? MapChangeControlChanged;
+
+    MapChangeState GetChangeState();
+
+    /// <summary>Schedules one cancellable change on the game thread. Delay is clamped to 0–300 seconds.</summary>
+    MapChangeRequestResult ScheduleChange(string mapId, int delaySeconds, string source);
+
+    /// <summary>Cancel countdown or download-followed-by-change; a Steam download itself may finish.</summary>
+    bool CancelPendingChange();
+
+    /// <summary>Pause cancels pending work and rejects further requests; resume does not revive old work.</summary>
+    void SetChangesPaused(bool paused, string actor);
 
     /// <summary>Requests a map change using an ID returned by <see cref="GetMaps"/>.</summary>
     MapChangeRequestResult RequestChange(string mapId);

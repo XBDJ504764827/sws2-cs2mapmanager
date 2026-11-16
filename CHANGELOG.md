@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Cancellable map changes
+
+- Centralize countdowns, cancellation and temporary pause/resume in the shared map service. Expose pending state and control notifications.
+- Guard all delayed and download callbacks by request identity, isolate consumer failures and clear requests when configuration or scheduling fails.
+- Add shared-service regression checks for cancellation, pause, downloads and stale callbacks.
+
 ### NUB / PRO ratings
 
 - Support nested CKZ/VNL NUB/PRO ratings in configuration and expose four independent nullable fields through MapInfo. Preserve legacy scalar metadata without inferring a run type.

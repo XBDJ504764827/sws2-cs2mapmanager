@@ -10,7 +10,7 @@ namespace Sws2Cs2MapManager.Services;
 /// <summary>Owns the configured map catalog and coordinates map changes.</summary>
 internal sealed class MapManagerService : IMapManagerService, IDisposable
 {
-    private sealed record PendingWorkshopChange(MapInfo Map, DateTimeOffset Deadline, int TimeoutSeconds);
+    private sealed record PendingWorkshopChange(Guid Request, MapInfo Map, DateTimeOffset Deadline, int TimeoutSeconds);
 
     private readonly ISwiftlyCore _core;
     private readonly ILogger _logger;
@@ -23,6 +23,8 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
     private PendingWorkshopChange? _pendingWorkshopChange;
     private CancellationTokenSource? _pendingCheck;
     private bool _disposed;
+    private readonly MapChangeGate _gate = new();
+    private CancellationTokenSource? _changeTimer;
 
     public MapManagerService(
         ISwiftlyCore core,
@@ -58,7 +60,95 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
         }
     }
 
-    public MapChangeRequestResult RequestChange(string mapId)
+    public event EventHandler? MapChangeControlChanged;
+
+    public MapChangeState GetChangeState() { lock (_sync) return _gate.State; }
+
+    public bool CancelPendingChange()
+    {
+        MapInfo? cancelled;
+        lock (_sync)
+        {
+            cancelled = _gate.Cancel();
+            _changeTimer?.Cancel(); _changeTimer = null;
+            ClearPendingWorkshopChange();
+        }
+        if (cancelled is not null) RaiseProgress(cancelled, MapChangeProgress.Cancelled);
+        RaiseControlChanged();
+        return cancelled is not null;
+    }
+
+    public void SetChangesPaused(bool paused, string actor)
+    {
+        lock (_sync)
+        {
+            if (_gate.State.IsPaused == paused) return;
+            var cancelled = _gate.Pause(paused, actor);
+            _changeTimer?.Cancel(); _changeTimer = null;
+            ClearPendingWorkshopChange();
+            if (cancelled is not null) RaiseProgress(cancelled, MapChangeProgress.Cancelled);
+        }
+        _logger.LogInformation("[sws2-cs2mapmanager] Map changes paused={Paused} by {Actor}", paused, actor);
+        RaiseControlChanged();
+    }
+
+    public MapChangeRequestResult RequestChange(string mapId) => ScheduleChange(mapId, 0, "plugin");
+
+    public MapChangeRequestResult ScheduleChange(string mapId, int delaySeconds, string source)
+    {
+        MapInfo? map;
+        Guid request;
+        lock (_sync)
+        {
+            if (_disposed) return new(MapChangeRequestStatus.Failed, Error: "Map manager is unloading.");
+            if (!_maps.TryGetValue(mapId?.Trim() ?? "", out map)) return new(MapChangeRequestStatus.MapNotFound);
+            var status = _gate.Begin(map, Math.Clamp(delaySeconds, 0, 300), source, out request);
+            if (status != MapChangeRequestStatus.Scheduled) return new(status, map);
+            if (delaySeconds > 0)
+            {
+                delaySeconds = Math.Clamp(delaySeconds, 1, 300);
+                try
+                {
+                    _changeTimer = _core.Scheduler.DelayBySeconds(delaySeconds, () => ExecuteScheduled(request));
+                }
+                catch (Exception exception)
+                {
+                    _gate.Finish(request);
+                    return Fail(map, MapChangeRequestStatus.Failed, exception.Message, exception);
+                }
+                RaiseProgress(map, MapChangeProgress.CountdownStarted, delaySeconds: delaySeconds);
+                return new(MapChangeRequestStatus.Scheduled, map);
+            }
+        }
+        return ExecuteScheduled(request);
+    }
+
+    private MapChangeRequestResult ExecuteScheduled(Guid request)
+    {
+        lock (_sync)
+        {
+            if (_disposed || !_gate.IsCurrent(request)) return new(MapChangeRequestStatus.Failed, Error: "Request cancelled.");
+            _changeTimer = null;
+            var map = _gate.State.PendingMap!;
+            try
+            {
+                var result = StartChange(map.Id, request);
+                if (result.Status == MapChangeRequestStatus.MapNotFound)
+                    result = Fail(map, result.Status, "The map was removed from the catalog during the countdown.");
+                if (result.Status is not (MapChangeRequestStatus.DownloadStarted or MapChangeRequestStatus.DownloadAlreadyPending))
+                    _gate.Finish(request);
+                return result;
+            }
+            catch (Exception exception)
+            {
+                ClearPendingWorkshopChange();
+                _gate.Finish(request);
+                return Fail(map, MapChangeRequestStatus.Failed, exception.Message, exception);
+            }
+        }
+    }
+
+    private MapChangeRequestResult StartChange(string mapId, Guid request)
     {
         if (string.IsNullOrWhiteSpace(mapId))
         {
@@ -95,12 +185,12 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
                 return Fail(map, MapChangeRequestStatus.InvalidMap, error);
             }
 
-            return IssueMapChange(map, $"changelevel {map.Value}");
+            return IssueMapChange(map, $"changelevel {map.Value}", request);
         }
 
         if (TryCheckMapAvailable(map, out _))
         {
-            return IssueMapChange(map, $"host_workshop_map {map.Value}");
+            return IssueMapChange(map, $"host_workshop_map {map.Value}", request);
         }
 
         if (string.IsNullOrWhiteSpace(downloadCommand)
@@ -120,11 +210,12 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
             }
 
             _pendingWorkshopChange = new PendingWorkshopChange(
-                map,
+                request, map,
                 DateTimeOffset.UtcNow.AddSeconds(downloadTimeout),
                 downloadTimeout);
         }
 
+        _gate.Downloading(request);
         try
         {
             _core.Engine.ExecuteCommand($"{downloadCommand} {map.Value}");
@@ -140,8 +231,9 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
             map.Name,
             map.Value);
         RaiseProgress(map, MapChangeProgress.DownloadStarted);
-        SchedulePendingCheck();
-        return new MapChangeRequestResult(MapChangeRequestStatus.DownloadStarted, map);
+        return SchedulePendingCheck()
+            ? new MapChangeRequestResult(MapChangeRequestStatus.DownloadStarted, map)
+            : new MapChangeRequestResult(MapChangeRequestStatus.Failed, map, "Unable to schedule Workshop download checks.");
     }
 
     public void Dispose()
@@ -154,6 +246,9 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
             }
 
             _disposed = true;
+            _gate.Cancel();
+            _changeTimer?.Cancel();
+            _changeTimer = null;
             _pendingCheck?.Cancel();
             _pendingCheck = null;
             _pendingWorkshopChange = null;
@@ -162,6 +257,7 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
         _core.Event.OnMapUnload -= OnMapUnload;
         _core.Event.OnConsoleOutput -= OnConsoleOutput;
         MapChangeProgressed = null;
+        MapChangeControlChanged = null;
     }
 
     private void RebuildMapCatalog()
@@ -331,10 +427,12 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
         }
     }
 
-    private MapChangeRequestResult IssueMapChange(MapInfo map, string command)
+    private MapChangeRequestResult IssueMapChange(MapInfo map, string command, Guid request)
     {
         try
         {
+            if (_disposed || !_gate.IsCurrent(request)) return new(MapChangeRequestStatus.Failed, map, "Request cancelled.");
+            _gate.Finish(request);
             _core.Engine.ExecuteCommand(command);
             _logger.LogInformation(
                 "[sws2-cs2mapmanager] Issued map change to {MapName} ({MapId})",
@@ -349,36 +447,47 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
         }
     }
 
-    private void SchedulePendingCheck()
+    private bool SchedulePendingCheck()
     {
         lock (_sync)
         {
             if (_disposed || _pendingWorkshopChange is null)
             {
-                return;
+                return false;
             }
 
-            _pendingCheck = _core.Scheduler.DelayBySeconds(1, CheckPendingWorkshopChange);
+            var request = _pendingWorkshopChange.Request;
+            try
+            {
+                _pendingCheck = _core.Scheduler.DelayBySeconds(1, () => CheckPendingWorkshopChange(false, request));
+                return true;
+            }
+            catch (Exception exception)
+            {
+                var map = _pendingWorkshopChange.Map;
+                ClearPendingWorkshopChange();
+                _gate.Finish(request);
+                Fail(map, MapChangeRequestStatus.Failed, exception.Message, exception);
+                return false;
+            }
         }
     }
 
-    private void CheckPendingWorkshopChange()
-    {
-        CheckPendingWorkshopChange(force: false);
-    }
-
-    private void CheckPendingWorkshopChange(bool force)
+    private void CheckPendingWorkshopChange(bool force, Guid expected)
     {
         PendingWorkshopChange? pending;
         lock (_sync)
         {
-            _pendingCheck = null;
             if (_disposed || _pendingWorkshopChange is null)
             {
                 return;
             }
 
             pending = _pendingWorkshopChange;
+            if (pending.Request != expected || !_gate.IsCurrent(pending.Request)) return;
+            // A forced completion can overtake the polling timer. Retire that timer too.
+            _pendingCheck?.Cancel();
+            _pendingCheck = null;
         }
 
         bool isReady;
@@ -410,14 +519,13 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
                 }
 
                 _pendingWorkshopChange = null;
+                _logger.LogInformation(
+                    "[sws2-cs2mapmanager] Workshop addon {WorkshopId} finished downloading; changing map to {MapName}",
+                    pending.Map.Value,
+                    pending.Map.Name);
+                IssueMapChange(pending.Map, $"host_workshop_map {pending.Map.Value}", pending.Request);
+                return;
             }
-
-            _logger.LogInformation(
-                "[sws2-cs2mapmanager] Workshop addon {WorkshopId} finished downloading; changing map to {MapName}",
-                pending.Map.Value,
-                pending.Map.Name);
-            IssueMapChange(pending.Map, $"host_workshop_map {pending.Map.Value}");
-            return;
         }
 
         if (DateTimeOffset.UtcNow >= pending.Deadline)
@@ -432,6 +540,7 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
                 _pendingWorkshopChange = null;
             }
 
+            _gate.Finish(pending.Request);
             Fail(
                 pending.Map,
                 MapChangeRequestStatus.Failed,
@@ -439,7 +548,10 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
             return;
         }
 
-        SchedulePendingCheck();
+        lock (_sync)
+        {
+            if (ReferenceEquals(_pendingWorkshopChange, pending)) SchedulePendingCheck();
+        }
     }
 
     private void OnMapUnload(SwiftlyS2.Shared.Events.IOnMapUnloadEvent @event)
@@ -447,6 +559,8 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
         PendingWorkshopChange? cancelled;
         lock (_sync)
         {
+            _gate.Pause(false, "map unload");
+            _changeTimer?.Cancel(); _changeTimer = null;
             cancelled = _pendingWorkshopChange;
             _pendingWorkshopChange = null;
             _pendingCheck?.Cancel();
@@ -481,7 +595,7 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
         var message = @event.Message;
         if (string.IsNullOrEmpty(message)
             || !message.Contains("downloaded successfully", StringComparison.OrdinalIgnoreCase)
-            || !message.Contains(pending.Map.Value, StringComparison.Ordinal))
+            || !message.Contains($"Addon {pending.Map.Value} downloaded successfully", StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
@@ -489,7 +603,7 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
         _logger.LogInformation(
             "[sws2-cs2mapmanager] MultiAddonManager reported Workshop addon {WorkshopId} as downloaded",
             pending.Map.Value);
-        _core.Scheduler.NextTick(() => CheckPendingWorkshopChange(force: true));
+        _core.Scheduler.NextTick(() => CheckPendingWorkshopChange(force: true, expected: pending.Request));
     }
 
     private void ClearPendingWorkshopChange()
@@ -521,7 +635,21 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
         return new MapChangeRequestResult(status, map, error);
     }
 
-    private void RaiseProgress(MapInfo map, MapChangeProgress progress, string? error = null)
+    private void RaiseControlChanged()
+    {
+        var handlers = MapChangeControlChanged;
+        if (handlers is null) return;
+        foreach (EventHandler handler in handlers.GetInvocationList())
+        {
+            try { handler(this, EventArgs.Empty); }
+            catch (Exception exception)
+            {
+                _logger.LogError(exception, "[sws2-cs2mapmanager] MapChangeControlChanged handler threw");
+            }
+        }
+    }
+
+    private void RaiseProgress(MapInfo map, MapChangeProgress progress, string? error = null, int delaySeconds = 0)
     {
         var handlers = MapChangeProgressed;
         if (handlers is null)
@@ -529,7 +657,7 @@ internal sealed class MapManagerService : IMapManagerService, IDisposable
             return;
         }
 
-        var args = new MapChangeProgressEventArgs(map, progress, error);
+        var args = new MapChangeProgressEventArgs(map, progress, error, delaySeconds);
         foreach (EventHandler<MapChangeProgressEventArgs> handler in handlers.GetInvocationList())
         {
             try
