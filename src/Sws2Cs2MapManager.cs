@@ -15,6 +15,7 @@ public partial class Sws2Cs2MapManager : BasePlugin
     private MapManagerService? _maps;
     private ServiceProvider? _provider;
     private IDisposable? _settingsSubscription;
+    private string _configPath = string.Empty;
 
     public Sws2Cs2MapManager(ISwiftlyCore core) : base(core)
     {
@@ -25,6 +26,7 @@ public partial class Sws2Cs2MapManager : BasePlugin
         Core.Configuration
             .InitializeWithTemplate("config.jsonc", "config.template.jsonc")
             .Configure(builder => builder.AddJsonFile("config.jsonc", optional: false, reloadOnChange: true));
+        _configPath = Core.Configuration.GetConfigPath("config.jsonc");
 
         var services = new ServiceCollection();
         services.AddSwiftly(Core)
@@ -34,10 +36,12 @@ public partial class Sws2Cs2MapManager : BasePlugin
         _provider = services.BuildServiceProvider();
         var options = _provider.GetRequiredService<IOptionsMonitor<MapManagerSettings>>();
         var settings = options.CurrentValue;
-        _maps = new MapManagerService(Core, settings);
+        var configuredMaps = ConfiguredMapReader.ReadAvailable(_configPath, Core.Logger);
+        _maps = new MapManagerService(Core, settings, configuredMaps);
         _settingsSubscription = options.OnChange(newSettings => Core.Scheduler.NextTick(() =>
         {
-            _maps?.ApplySettings(newSettings);
+            var reloadedMaps = ConfiguredMapReader.ReadAvailable(_configPath, Core.Logger);
+            _maps?.ApplySettings(newSettings, reloadedMaps);
             Core.Logger.LogInformation("[sws2-cs2mapmanager] Configuration reloaded");
         }));
         Core.Logger.LogInformation("[sws2-cs2mapmanager] Plugin loaded (hotReload: {HotReload})", hotReload);
@@ -59,6 +63,7 @@ public partial class Sws2Cs2MapManager : BasePlugin
         _settingsSubscription = null;
         _maps?.Dispose();
         _maps = null;
+        _configPath = string.Empty;
         _provider?.Dispose();
         _provider = null;
     }

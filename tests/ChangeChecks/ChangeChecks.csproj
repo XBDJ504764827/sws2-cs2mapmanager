@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="../../contracts/Sws2Cs2MapManager.Contracts.csproj" />
+    <Compile Include="../../src/Services/MapChangeGate.cs" Link="MapChangeGate.cs" />
+    <Compile Include="../../src/Services/MapManagerService.cs" Link="MapManagerService.cs" />
+    <Compile Include="../../src/Configuration/MapManagerSettings.cs" Link="MapManagerSettings.cs" />
+  </ItemGroup>
+</Project>
